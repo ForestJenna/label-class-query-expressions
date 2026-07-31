@@ -4,104 +4,119 @@ import os
 import arcpy
 
 
-def _bool_to_text(value):
-    if value is None:
-        return ""
-    return "True" if bool(value) else "False"
+def _is_data_layer(layer):
+    if getattr(layer, "isGroupLayer", False):
+        return False
+    try:
+        return layer.supports("DEFINITIONQUERY")
+    except Exception:
+        return False
 
 
-def _get_definition_queries(layer):
+def _list_layer_definition_queries(layer):
     queries = []
+    try:
+        query_items = layer.listDefinitionQueries() or []
+    except Exception:
+        query_items = []
 
-    if layer.supports("DEFINITIONQUERY"):
-        try:
-            queries = list(layer.listDefinitionQueries() or [])
-        except Exception:
-            queries = []
+    for item in query_items:
+        title = item.get("name", "")
+        sql = item.get("sql", "")
+        is_active = bool(item.get("isActive", False))
+        queries.append((title, sql, is_active))
 
-        if not queries:
-            sql = getattr(layer, "definitionQuery", "")
-            if sql:
-                queries = [{"name": "", "sql": sql, "isActive": True}]
+    if queries:
+        return queries
 
-    return queries
+    fallback_sql = getattr(layer, "definitionQuery", "") or ""
+    if fallback_sql:
+        return [("", fallback_sql, True)]
+    return [("", "", False)]
 
 
-def _get_label_classes(layer):
+def _list_layer_label_expressions(layer):
     if not layer.supports("SHOWLABELS"):
-        return []
+        return [("", "", "", False)]
 
     try:
-        return list(layer.listLabelClasses() or [])
+        label_classes = list(layer.listLabelClasses() or [])
     except Exception:
-        return []
+        label_classes = []
+
+    expressions = []
+    for label_class in label_classes:
+        expression_title = getattr(label_class, "className", "")
+        label_class_query = getattr(label_class, "SQLQuery", "")
+        label_expression = getattr(label_class, "expression", "")
+        expression_is_active = bool(getattr(label_class, "visible", False))
+        expressions.append(
+            (
+                expression_title,
+                label_class_query,
+                label_expression,
+                expression_is_active,
+            )
+        )
+
+    if expressions:
+        return expressions
+    return [("", "", "", False)]
 
 
 def export_label_classes_and_queries(aprx_path, map_name, output_csv):
     aprx = arcpy.mp.ArcGISProject(aprx_path)
-    maps = [m for m in aprx.listMaps() if m.name == map_name]
+    maps = aprx.listMaps(map_name)
     if not maps:
-        raise ValueError("Map not found: {}".format(map_name))
-
+        raise ValueError("Map '{}' was not found in '{}'.".format(map_name, aprx_path))
     map_obj = maps[0]
-    rows = []
+    os.makedirs(os.path.dirname(output_csv) or ".", exist_ok=True)
 
-    for layer in map_obj.listLayers():
-        if getattr(layer, "isGroupLayer", False):
-            continue
+    with open(output_csv, "w", newline="", encoding="utf-8") as csv_file:
+        writer = csv.writer(csv_file)
+        writer.writerow(
+            [
+                "map_name",
+                "layer_name",
+                "query_title",
+                "definition_query",
+                "is_active",
+                "expression_title",
+                "label_class_query",
+                "label_expression",
+                "expression_is_active",
+            ]
+        )
 
-        definition_queries = _get_definition_queries(layer)
-        label_classes = _get_label_classes(layer)
+        row_count = 0
+        for layer in map_obj.listLayers():
+            if not _is_data_layer(layer):
+                continue
 
-        if not definition_queries:
-            definition_queries = [None]
-        if not label_classes:
-            label_classes = [None]
+            for query_title, definition_query, is_active in _list_layer_definition_queries(layer):
+                for (
+                    expression_title,
+                    label_class_query,
+                    label_expression,
+                    expression_is_active,
+                ) in _list_layer_label_expressions(layer):
+                    writer.writerow(
+                        [
+                            map_obj.name,
+                            layer.name,
+                            query_title,
+                            definition_query,
+                            is_active,
+                            expression_title,
+                            label_class_query,
+                            label_expression,
+                            expression_is_active,
+                        ]
+                    )
+                    row_count += 1
 
-        for definition_query in definition_queries:
-            for label_class in label_classes:
-                rows.append(
-                    {
-                        "map_name": map_obj.name,
-                        "layer_name": layer.name,
-                        "layer_long_name": getattr(layer, "longName", layer.name),
-                        "layer_visible": _bool_to_text(getattr(layer, "visible", None)),
-                        "labels_enabled": _bool_to_text(getattr(layer, "showLabels", None)),
-                        "definition_query_name": "" if definition_query is None else definition_query.get("name", ""),
-                        "definition_query_sql": "" if definition_query is None else definition_query.get("sql", ""),
-                        "definition_query_is_active": "" if definition_query is None else _bool_to_text(definition_query.get("isActive")),
-                        "label_class_name": "" if label_class is None else getattr(label_class, "className", ""),
-                        "label_class_sql_query": "" if label_class is None else getattr(label_class, "SQLQuery", ""),
-                        "label_expression": "" if label_class is None else getattr(label_class, "expression", ""),
-                        "label_class_is_active": "" if label_class is None else _bool_to_text(getattr(label_class, "visible", None)),
-                    }
-                )
-
-    output_dir = os.path.dirname(output_csv)
-    if output_dir and not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-
-    fieldnames = [
-        "map_name",
-        "layer_name",
-        "layer_long_name",
-        "layer_visible",
-        "labels_enabled",
-        "definition_query_name",
-        "definition_query_sql",
-        "definition_query_is_active",
-        "label_class_name",
-        "label_class_sql_query",
-        "label_expression",
-        "label_class_is_active",
-    ]
-
-    with open(output_csv, "w", newline="", encoding="utf-8-sig") as csv_file:
-        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
-
-    return len(rows)
+    arcpy.AddMessage("Label class/query report written to: {}".format(output_csv))
+    return row_count
 
 
 def main():
@@ -112,9 +127,7 @@ def main():
     row_count = export_label_classes_and_queries(aprx_path, map_name, output_csv)
 
     arcpy.AddMessage("Export complete.")
-    arcpy.AddMessage("Map: {}".format(map_name))
     arcpy.AddMessage("Rows written: {}".format(row_count))
-    arcpy.AddMessage("CSV: {}".format(output_csv))
 
 
 if __name__ == "__main__":

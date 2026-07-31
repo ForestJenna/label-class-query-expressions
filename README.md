@@ -20,13 +20,10 @@ ArcGIS Pro script-tool-ready Python script that reads all data layers in a speci
 
 - `map_name`
 - `layer_name`
-- `layer_long_name`
-- `layer_visible`
-- `labels_enabled`
-- `definition_query_name`
-- `definition_query_sql`
-- `definition_query_is_active`
-- `label_class_name`
-- `label_class_sql_query`
+- `query_title`
+- `definition_query`
+- `is_active`
+- `expression_title`
+- `label_class_query`
 - `label_expression`
-- `label_class_is_active`
+- `expression_is_active`
