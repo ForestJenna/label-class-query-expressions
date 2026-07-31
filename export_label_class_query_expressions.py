@@ -13,28 +13,6 @@ def _is_data_layer(layer):
         return False
 
 
-def _list_layer_definition_queries(layer):
-    queries = []
-    try:
-        query_items = layer.listDefinitionQueries() or []
-    except Exception:
-        query_items = []
-
-    for item in query_items:
-        title = item.get("name", "")
-        sql = item.get("sql", "")
-        is_active = bool(item.get("isActive", False))
-        queries.append((title, sql, is_active))
-
-    if queries:
-        return queries
-
-    fallback_sql = getattr(layer, "definitionQuery", "") or ""
-    if fallback_sql:
-        return [("", fallback_sql, True)]
-    return [("", "", False)]
-
-
 def _list_layer_label_expressions(layer):
     if not layer.supports("SHOWLABELS"):
         return [("", "", "", False)]
@@ -46,16 +24,22 @@ def _list_layer_label_expressions(layer):
 
     expressions = []
     for label_class in label_classes:
-        expression_title = getattr(label_class, "className", "")
+        class_title = (
+            getattr(label_class, "className", "")
+            or getattr(label_class, "name", "")
+            or getattr(label_class, "Name", "")
+            or "Default"
+        )
         label_class_query = getattr(label_class, "SQLQuery", "")
         label_expression = getattr(label_class, "expression", "")
-        expression_is_active = bool(getattr(label_class, "visible", False))
+        # ArcGIS Pro checkbox "Label features in this class" maps to LabelClass.visible.
+        label_is_on = bool(getattr(label_class, "visible", False))
         expressions.append(
             (
-                expression_title,
+                class_title,
                 label_class_query,
                 label_expression,
-                expression_is_active,
+                label_is_on,
             )
         )
 
@@ -78,13 +62,11 @@ def export_label_classes_and_queries(aprx_path, map_name, output_csv):
             [
                 "map_name",
                 "layer_name",
-                "query_title",
-                "definition_query",
-                "is_active",
-                "expression_title",
+                "layer_label_is_on",
+                "class_title",
                 "label_class_query",
                 "label_expression",
-                "expression_is_active",
+                "label_is_on",
             ]
         )
 
@@ -93,27 +75,21 @@ def export_label_classes_and_queries(aprx_path, map_name, output_csv):
             if not _is_data_layer(layer):
                 continue
 
-            for query_title, definition_query, is_active in _list_layer_definition_queries(layer):
-                for (
-                    expression_title,
-                    label_class_query,
-                    label_expression,
-                    expression_is_active,
-                ) in _list_layer_label_expressions(layer):
-                    writer.writerow(
-                        [
-                            map_obj.name,
-                            layer.name,
-                            query_title,
-                            definition_query,
-                            is_active,
-                            expression_title,
-                            label_class_query,
-                            label_expression,
-                            expression_is_active,
-                        ]
-                    )
-                    row_count += 1
+            layer_label_is_on = bool(layer.showLabels) if layer.supports("SHOWLABELS") else False
+
+            for class_title, label_class_query, label_expression, label_is_on in _list_layer_label_expressions(layer):
+                writer.writerow(
+                    [
+                        map_obj.name,
+                        layer.name,
+                        layer_label_is_on,
+                        class_title,
+                        label_class_query,
+                        label_expression,
+                        label_is_on,
+                    ]
+                )
+                row_count += 1
 
     arcpy.AddMessage("Label class/query report written to: {}".format(output_csv))
     return row_count
