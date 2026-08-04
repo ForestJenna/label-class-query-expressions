@@ -33,13 +33,13 @@ def _list_layer_label_expressions(layer):
         label_class_query = getattr(label_class, "SQLQuery", "")
         label_expression = getattr(label_class, "expression", "")
         # ArcGIS Pro checkbox "Label features in this class" maps to LabelClass.visible.
-        label_is_on = bool(getattr(label_class, "visible", False))
+        class_label_is_on = bool(getattr(label_class, "visible", False))
         expressions.append(
             (
                 class_title,
                 label_class_query,
                 label_expression,
-                label_is_on,
+                class_label_is_on,
             )
         )
 
@@ -66,7 +66,7 @@ def export_label_classes_and_queries(aprx_path, map_name, output_csv):
                 "class_title",
                 "label_class_query",
                 "label_expression",
-                "label_is_on",
+                "class_label_is_on",
             ]
         )
 
@@ -77,7 +77,7 @@ def export_label_classes_and_queries(aprx_path, map_name, output_csv):
 
             layer_label_is_on = bool(layer.showLabels) if layer.supports("SHOWLABELS") else False
 
-            for class_title, label_class_query, label_expression, label_is_on in _list_layer_label_expressions(layer):
+            for class_title, label_class_query, label_expression, class_label_is_on in _list_layer_label_expressions(layer):
                 writer.writerow(
                     [
                         map_obj.name,
@@ -86,7 +86,7 @@ def export_label_classes_and_queries(aprx_path, map_name, output_csv):
                         class_title,
                         label_class_query,
                         label_expression,
-                        label_is_on,
+                        class_label_is_on,
                     ]
                 )
                 row_count += 1
